@@ -4,7 +4,6 @@ import copy from 'rollup-plugin-copy';
 import alias from '@rollup/plugin-alias';
 import buble from '@rollup/plugin-buble';
 import replace from '@rollup/plugin-replace';
-import nodeResolve from 'rollup-plugin-node-resolve';
 import generatePackageJson from 'rollup-plugin-generate-package-json'
 
 const outDir = 'dist/';

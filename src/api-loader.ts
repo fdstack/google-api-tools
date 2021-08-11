@@ -1,106 +1,105 @@
-import { GOOGLE_MAP_URL, GOOGLE_RECAPTCHA_URL } from './constants';
-import { emptyPromise, loadApi } from './utils';
+import {
+  GOOGLE_MAP_CALLBACK,
+  GOOGLE_MAP_ID,
+  GOOGLE_MAP_URL, GOOGLE_RECAPTCHA_CALLBACK,
+  GOOGLE_RECAPTCHA_ID,
+  GOOGLE_RECAPTCHA_URL
+} from './constants';
+import {
+  CallbackName,
+  GoogleAPILoaderOptions,
+  IGoogleMap,
+  IGoogleRecaptcha,
+} from './types';
 
-export interface ApiLoaderOptions {
-  recap?: boolean;
-  map?: GoogleMapOptions | false;
-}
+export class GoogleAPILoader {
+  private readonly mapConfig?: IGoogleMap;
+  private readonly recaptchaConfig: IGoogleRecaptcha;
+  private recaptcha?: ReCaptchaV2.ReCaptcha;
+  private map?: typeof google;
 
-export interface GoogleMapOptions {
-  apiKey: string;
-  libraries?: string;
-}
-
-export type RecaptchaPromise = () => Promise<ReCaptchaV2.ReCaptcha|null>;
-export type MapPromise = () => Promise<any>;
-
-/**
- * Loads the google map and/or google recaptcha js library,
- * Provides a function for each library specified in the options
- * and returns a promise that resolves to the respective global object once loaded
- *
- * @param options
- * @throws Error - when map options are missing an api key
- */
-export function apiLoader(options: ApiLoaderOptions): { map?: MapPromise, recap?: RecaptchaPromise } {
-  validateOptions(options);
-  let isMapLoaded = false;
-  let isRecapLoaded = false;
-
-  const api: { map?: MapPromise, recap?: RecaptchaPromise } = {};
-  const config: ApiLoaderOptions = {
-    recap: options.recap ? options.recap : false,
-    map: options.map ? options.map : false,
-  };
-
-  if (config.recap) {
-    api.recap = makeRecapPromise();
-  }
-  if (config.map) {
-    api.map = makeMapPromise(config.map.apiKey, config.map.libraries);
-  }
-
-  function makeMapPromise(apiKey: string, libraries?: string): MapPromise {
-    if (window !== undefined) {
-      let mapApiUrl = `${GOOGLE_MAP_URL}&key=${apiKey}`;
-      if (libraries) {
-        mapApiUrl += `&libraries=${libraries}`;
-      }
-
-      let promise = new Promise((resolve, reject) => {
-        try {
-          window.gMapRes = resolve;
-          loadApi(mapApiUrl, isMapLoaded);
-        } catch (err) {
-          reject(err);
-        }
-      });
-
-      return () => {
-        if (!isMapLoaded) {
-          isMapLoaded = true;
-          promise = promise.then(_ => window.google);
-        }
-        return promise;
-      };
-    }
-    return emptyPromise();
-  }
-  function makeRecapPromise(): RecaptchaPromise {
-    if (window !== undefined) {
-      let promise: Promise<ReCaptchaV2.ReCaptcha> = new Promise((resolve, reject) => {
-        try {
-          window.gRecapRes = resolve;
-          loadApi(GOOGLE_RECAPTCHA_URL, isRecapLoaded);
-        } catch (err) {
-          reject(err);
-        }
-      });
-
-      return () => {
-        if (!isRecapLoaded) {
-          isRecapLoaded = true;
-          promise = promise.then(_ => window.grecaptcha);
-        }
-        return promise;
-      };
-    }
-    return emptyPromise();
-  }
-
-  return api;
-}
-
-function validateOptions(options: ApiLoaderOptions) {
-  if (!options) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error(`It looks like you may have forgotten to configure the 
-      @fdstack/google-api-tools/api-loader. See https://github.com/fdstack/google-api-tools for more details`);
-    }
-    return;
-  }
-  if (options && options.map && !options.map.apiKey) {
-    throw new Error(`A google maps javascript API key is required to use google maps. You must either
+  constructor(private options: GoogleAPILoaderOptions) {
+    if (this.options && this.options.map && !this.options.map.apiKey) {
+      throw new Error(`A google maps javascript API key is required to use google maps. You must either
     define options.map as false, leave it undefined, or pass an api key`);
+    }
+    this.recaptchaConfig = { id: GOOGLE_RECAPTCHA_ID, ...this.options.recaptcha };
+    this.mapConfig =
+      this.options.map !== undefined
+        ? { id: GOOGLE_MAP_ID, ...this.options.map }
+        : undefined;
+  }
+
+  async loadMaps(): Promise<typeof google> {
+    if (!this.mapConfig) throw new Error('To load the Google Maps library the GoogleMapOptions must be provided with an API key');
+
+    if (!this.map) {
+      let mapApiUrl = `${GOOGLE_MAP_URL}&key=${this.mapConfig.apiKey}`;
+      if (this.mapConfig.libraries) {
+        mapApiUrl += `&libraries=${this.mapConfig.libraries}`;
+      }
+      if (this.mapConfig.language) {
+        mapApiUrl += `&language=${this.mapConfig.language}`;
+      }
+      if (this.mapConfig.region) {
+        mapApiUrl += `&region=${this.mapConfig.region}`;
+      }
+      try {
+        await this.createAPIPromise(this.mapConfig.id, mapApiUrl, GOOGLE_MAP_CALLBACK);
+      } catch (e) {
+        // TODO: Handle errors gracefully. Possibly with a retry
+        console.error('Loading Google Maps failed with the following error: ', e);
+        throw e;
+      }
+      this.map = window.google;
+    }
+
+    return this.map;
+  }
+
+  async loadRecaptcha(): Promise<ReCaptchaV2.ReCaptcha> {
+    if (!this.recaptcha) {
+      try {
+        await this.createAPIPromise(this.recaptchaConfig.id, GOOGLE_RECAPTCHA_URL, GOOGLE_RECAPTCHA_CALLBACK);
+      } catch (e) {
+        // TODO: Handle errors gracefully. Possibly with a retry
+        console.error('Loading Google Recaptcha failed with the following error: ', e)
+        throw e;
+      }
+      this.recaptcha = window.grecaptcha;
+    }
+    return this.recaptcha
+  }
+
+  private createAPIPromise(id: string, url: string, callbackName: CallbackName): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        window[callbackName] = resolve;
+        this.createScript(url, id);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  private createScript(url: string, id: string): void {
+    if (!document) {
+      return;
+    }
+    const created = document.getElementById(id);
+    if (!created) {
+      const script = document.createElement('script');
+      script.id = id;
+      script.type = 'text/javascript';
+      script.src = url;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    } else {
+      // TODO: Come back to consider how this works here
+      console.error(
+        `The script tag with the id "${id}" is trying to load multiple times`
+      );
+    }
   }
 }

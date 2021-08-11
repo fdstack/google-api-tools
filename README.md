@@ -3,15 +3,14 @@ A couple handy functions I use when working with Google Maps, Google Recaptcha,
 or Google Tag Manager. 
 
 ## Google Map & Recaptcha
-When working with the google maps js library or google recaptcha, we need 
-to get access to the global objects but may want to defer loading the 
-script until we actually need them. In this case it is advantageous
-to have a Promise that will resolve with the global object once loaded.
+When working with Google Maps or Google Recaptcha, we need to get access to the global objects that load asynchronously.
+This package handles placing the proper script tags on the page and resolves a promise once the api has been loaded.
 
 ### Usage
 Early in your application lifecycle call the apiLoader function and provide 
 the returned output to the rest of your app. Below is a simple example with Vue.
-This could be modified to work with any framework though. 
+This could be modified to work with any framework though.
+
 ##### main.ts
 ```typescript
 import Vue from 'vue';
